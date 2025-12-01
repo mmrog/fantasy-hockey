@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Daily Lineup for {{ date }}</h1>
+
+<ul>
+    {% for slot in slots %}
+        <li>{{ slot.slot }} – {{ slot.player.name }}</li>
+    {% empty %}
+        <li>No lineup set today.</li>
+    {% endfor %}
+</ul>
+{% endblock %}

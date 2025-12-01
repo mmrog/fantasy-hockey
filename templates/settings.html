@@ -1,0 +1,57 @@
+{% load role_tags %}
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>League Settings – {{ league.name }}</h2>
+
+<p>Season: {{ league.season_year }}</p>
+
+<hr>
+
+<h3>General Settings</h3>
+<form method="POST">
+    {% csrf_token %}
+    <label>League Name:</label>
+    <input type="text" name="name" value="{{ league.name }}">
+
+    <label>Season Year:</label>
+    <input type="number" name="season_year" value="{{ league.season_year }}">
+
+    <button type="submit">Save Settings</button>
+</form>
+
+<hr>
+
+<h3>Commissioner Tools</h3>
+<ul>
+    <li><a href="#">Scoring Categories</a></li>
+    <li><a href="#">Waiver Rules</a></li>
+    <li><a href="#">Roster Slots</a></li>
+    <li><a href="#">Import NHL Players</a></li>
+    <li><a href="#">Manage Teams</a></li>
+</ul>
+
+{% endblock %}
+{% if league.scoring_mode == "FIXED" %}
+    <h3>Scoring Categories (Fixed)</h3>
+    <ul>
+        {% for cat in scoring_categories %}
+            <li>{{ cat.name }}: {{ cat.weight }}</li>
+        {% endfor %}
+    </ul>
+    <p>This league uses fixed standard scoring and cannot be edited.</p>
+{% endif %}
+{% if league.scoring_mode == "CUSTOM" %}
+    <h3>Scoring Categories (Custom)</h3>
+    <form method="POST">
+        {% csrf_token %}
+        {% for cat in scoring_categories %}
+            <label>{{ cat.name }}</label>
+            <input type="number" step="0.1" name="cat_{{ cat.id }}" value="{{ cat.weight }}">
+            <br>
+        {% endfor %}
+        <button type="submit">Save Weights</button>
+    </form>
+{% endif %}

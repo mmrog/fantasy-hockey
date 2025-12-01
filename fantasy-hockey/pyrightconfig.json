@@ -1,0 +1,11 @@
+{
+  "python.analysis.extraPaths": [
+    "./",
+    "./league",
+    "./config"
+  ],
+  "venvPath": "./venv",
+  "venv": "Scripts",
+  "reportMissingImports": true,
+  "reportMissingModuleSource": true
+}
