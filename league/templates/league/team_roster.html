@@ -1,0 +1,23 @@
+<h1>Your Team Roster</h1>
+<p>{{ team.name }} ({{ league.name }})</p>
+
+{% for player in roster %}
+<div style="background:#222; padding:15px; margin:15px; border-radius:10px; color:white;">
+    <h2>{{ player.name }}</h2>
+    <p>{{ player.position }} — {{ player.nhl_team }}</p>
+
+    {% with stats=player.playerstats_set.last %}
+        {% if stats %}
+            <p><strong>Stats for {{ stats.date }}:</strong></p>
+            <ul>
+                <li>Goals: {{ stats.goals }}</li>
+                <li>Assists: {{ stats.assists }}</li>
+                <li>Shots: {{ stats.sog }}</li>
+                <li>Hits: {{ stats.hits }}</li>
+            </ul>
+        {% else %}
+            <p>No stats available.</p>
+        {% endif %}
+    {% endwith %}
+</div>
+{% endfor %}

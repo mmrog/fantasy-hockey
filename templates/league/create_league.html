@@ -1,0 +1,26 @@
+league/urls.py
+
+path("league/create/", views.create_league, name="create_league"),
+
+
+
+
+
+@login_required
+def create_league(request):
+    if request.method == "POST":
+        name = request.POST.get("name")
+        season_year = request.POST.get("season_year")
+        scoring_mode = request.POST.get("scoring_mode")
+
+        league = League.objects.create(
+            name=name,
+            season_year=season_year,
+            commissioner=request.user,
+            scoring_mode=scoring_mode
+        )
+
+        # TODO: auto-create scoring categories here
+        return redirect("league_dashboard")
+
+    return render(request, "league/create_league.html")
