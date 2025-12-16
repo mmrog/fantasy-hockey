@@ -9,8 +9,13 @@ from .models import (
     Roster,
     DailyLineup,
     DailySlot,
-    ScoringCategory
+    ScoringCategory,
+    Draft,
+    DraftPick,
+    DraftOrder,
 )
+from .admin_actions import action_generate_draft_order, action_reset_draft_order
+
 
 # ======================
 # LEAGUE
@@ -32,7 +37,7 @@ class LeagueRoleAdmin(admin.ModelAdmin):
 
 
 # ======================
-# FANTASY TEAM
+# TEAM
 # ======================
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
@@ -77,8 +82,9 @@ class PlayerPositionAdmin(admin.ModelAdmin):
 # ======================
 @admin.register(Position)
 class PositionAdmin(admin.ModelAdmin):
-    list_display = ("code", "description", "is_lineup_slot")
-    search_fields = ("code",)
+    list_display = ("code", "league")
+    search_fields = ("code", "league__name")
+    list_filter = ("league",)
     filter_horizontal = ("allowed_player_positions",)
 
 
@@ -98,8 +104,8 @@ class RosterAdmin(admin.ModelAdmin):
 @admin.register(DailyLineup)
 class DailyLineupAdmin(admin.ModelAdmin):
     list_display = ("team", "date")
+    list_filter = ("team", "date")
     search_fields = ("team__name",)
-    list_filter = ("date", "team")
 
 
 # ======================
@@ -108,8 +114,8 @@ class DailyLineupAdmin(admin.ModelAdmin):
 @admin.register(DailySlot)
 class DailySlotAdmin(admin.ModelAdmin):
     list_display = ("lineup", "player", "slot", "id")
-    search_fields = ("lineup__team__name", "player__full_name")
     list_filter = ("slot",)
+    search_fields = ("lineup__team__name", "player__full_name")
 
 
 # ======================
@@ -118,5 +124,35 @@ class DailySlotAdmin(admin.ModelAdmin):
 @admin.register(ScoringCategory)
 class ScoringCategoryAdmin(admin.ModelAdmin):
     list_display = ("league", "stat_key", "name", "weight")
-    search_fields = ("league__name", "stat_key")
     list_filter = ("league",)
+    search_fields = ("league__name", "stat_key")
+
+
+# ======================
+# DRAFT
+# ======================
+@admin.register(Draft)
+class DraftAdmin(admin.ModelAdmin):
+    list_display = ("id", "league", "is_snake", "time_per_pick_seconds", "starts_at", "draft_order_generated")
+    list_filter = ("league", "is_snake")
+    actions = [action_generate_draft_order, action_reset_draft_order]
+
+
+@admin.register(DraftPick)
+class DraftPickAdmin(admin.ModelAdmin):
+    list_display = (
+        "draft",
+        "round_number",
+        "pick_number",
+        "overall_number",
+        "team",
+        "player",
+        "is_selected",
+    )
+    list_filter = ("draft", "round_number", "team")
+
+
+@admin.register(DraftOrder)
+class DraftOrderAdmin(admin.ModelAdmin):
+    list_display = ("draft", "team", "position")
+    ordering = ("draft", "position")

@@ -2,71 +2,129 @@ import requests
 from django.core.management.base import BaseCommand
 from league.models import Player, PlayerPosition
 
-# DIRECT AKAMAI IP FOR NHL API (bypasses DNS)
-AKAMAI_IP = "23.217.138.110"
-BASE_URL = f"https://{AKAMAI_IP}/api/v1"
 
-# Always spoof the Host header so Akamai knows what site we want
-HEADERS = {
-    "Host": "statsapi.web.nhl.com",
-    "User-Agent": "Mozilla/5.0"
-}
+def fetch_landing(player_id):
+    """Direct call to landing page (nhl_get cannot be used)."""
+    url = f"https://api-web.nhle.com/v1/player/{player_id}/landing"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
 
 
 class Command(BaseCommand):
-    help = "Imports NHL players using direct IP bypass (DNS not required)."
+    help = "Import NHL players using the modern NHL API."
 
-    def get(self, endpoint):
-        """Wrapper around requests.get using IP + Host header."""
-        url = BASE_URL + endpoint
-        response = requests.get(url, headers=HEADERS, timeout=10, verify=False)
-        return response.json()
+    def safe_json(self, url):
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
 
     def handle(self, *args, **kwargs):
-        self.stdout.write("Fetching NHL teams (IP bypass)...")
 
-        teams_data = self.get("/teams")
-        teams = teams_data.get("teams", [])
+        self.stdout.write("Fetching NHL standings...")
 
-        count = 0
+        standings = self.safe_json("https://api-web.nhle.com/v1/standings/now")
+        teams = standings.get("standings", [])
+
+        imported = 0
 
         for team in teams:
-            team_id = team["id"]
-            team_name = team["name"]
 
-            self.stdout.write(f"Processing {team_name}...")
+            team_name = team.get("teamName", {}).get("default", "Unknown")
+            team_abbrev = team.get("teamAbbrev", {}).get("default")
 
-            roster_data = self.get(f"/teams/{team_id}/roster")
-            roster = roster_data.get("roster", [])
+            if not team_abbrev:
+                continue
 
-            for entry in roster:
-                player_id = entry["person"]["id"]
+            self.stdout.write(f"Fetching roster for: {team_name} ({team_abbrev})")
 
-                # Player details lookup
-                pdata = self.get(f"/people/{player_id}")["people"][0]
+            roster = self.safe_json(f"https://api-web.nhle.com/v1/roster/{team_abbrev}/current")
 
-                position_code = pdata["primaryPosition"]["code"]
+            players = (
+                roster.get("forwards", [])
+                + roster.get("defensemen", [])
+                + roster.get("goalies", [])
+            )
 
-                # Ensure PlayerPosition exists
-                pos_obj, _ = PlayerPosition.objects.get_or_create(code=position_code)
+            for p in players:
+                player_id = p.get("id")
+                if not player_id:
+                    continue
 
-                # Save/update the player
+                landing_data = fetch_landing(player_id)
+
+                if not landing_data:
+                    self.stdout.write(self.style.WARNING(f"⚠ No landing page for {player_id}, skipping"))
+                    continue
+
+                # HERE IS THE FIX — landing_data IS THE PLAYER OBJECT
+                info = landing_data
+
+                # Validate real structure
+                if "firstName" not in info or "lastName" not in info:
+                    self.stdout.write(self.style.WARNING(f"⚠ No player data for {player_id}, skipping"))
+                    continue
+
+                first = info["firstName"].get("default", "")
+                last = info["lastName"].get("default", "")
+                full_name = info.get("fullName", f"{first} {last}".strip())
+
+                pos_code = info.get("positionCode", "UNK")
+                pos_obj, _ = PlayerPosition.objects.get_or_create(code=pos_code)
+
+                # Normalize stats
+                raw_stats = info.get("seasonTotals", {})
+
+                if isinstance(raw_stats, dict):
+                    stats = raw_stats
+                elif isinstance(raw_stats, list) and raw_stats and isinstance(raw_stats[0], dict):
+                    stats = raw_stats[0]
+                else:
+                    stats = {}
+
+                games = stats.get("gamesPlayed", 0)
+                goals = stats.get("goals", 0)
+                assists = stats.get("assists", 0)
+                points = stats.get("points", 0)
+                shots = stats.get("shots", 0)
+                hits = stats.get("hits", 0)
+
+                jersey = info.get("sweaterNumber")
+                shoots = info.get("shootsCatches")
+                headshot_url = f"https://assets.nhle.com/mugs/nhl/{player_id}.png"
+
                 Player.objects.update_or_create(
                     nhl_id=player_id,
                     defaults={
-                        "first_name": pdata["firstName"],
-                        "last_name": pdata["lastName"],
-                        "full_name": pdata["fullName"],
+                        "first_name": first,
+                        "last_name": last,
+                        "full_name": full_name,
                         "position": pos_obj,
-                        "shoots": pdata.get("shootsCatches"),
-                        "number": pdata.get("primaryNumber"),
-                        "headshot": (
-                            f"https://cms.nhl.bamgrid.com/images/headshots/current/"
-                            f"168x168/{player_id}.jpg"
-                        ),
-                    }
+                        "shoots": shoots,
+                        "number": jersey,
+                        "headshot": headshot_url,
+                        "games_played": games,
+                        "goals": goals,
+                        "assists": assists,
+                        "points": points,
+                        "shots": shots,
+                        "hits": hits,
+                    },
                 )
 
-                count += 1
+                imported += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Imported {count} players via IP bypass."))
+        self.stdout.write(
+            self.style.SUCCESS(f"Imported or updated {imported} NHL players successfully.")
+        )

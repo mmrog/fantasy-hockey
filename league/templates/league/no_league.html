@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+
 <h1>No League Found</h1>
-<p>You must create or join a league first.</p>
+<p>You are not in any leagues yet.</p>
+
+<div class="mb-3">
+    <a href="{% url 'create_league' %}" class="btn btn-primary me-2">
+        🏒 Create a New League (Commissioner)
+    </a>
+    <a href="{% url 'create_team' %}" class="btn btn-secondary">
+        🙋 Join Existing League (Create Team)
+    </a>
+</div>
+
 {% endblock %}
