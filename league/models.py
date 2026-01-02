@@ -1,6 +1,13 @@
-from django.db import models
+# league/models.py
+from __future__ import annotations
+
+import secrets
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import models
+from django.utils import timezone
+
 from .validators import player_fits_slot
 
 
@@ -21,48 +28,31 @@ class League(models.Model):
         User,
         on_delete=models.SET_NULL,
         null=True,
-        related_name="commissioned_leagues"
+        related_name="commissioned_leagues",
     )
 
     scoring_mode = models.CharField(
         max_length=10,
         choices=SCORING_MODES,
-        default="FIXED"
+        default="FIXED",
     )
 
-    # -------- Waiver Settings (per league) --------
-    skater_waiver_hours = models.PositiveIntegerField(
-        default=72,
-        help_text="Waiver duration in hours for skaters."
-    )
-    goalie_waiver_hours = models.PositiveIntegerField(
-        default=48,
-        help_text="Waiver duration in hours for goalies."
-    )
+    invite_code = models.CharField(max_length=12, unique=True, blank=True, db_index=True)
 
-    # -------- Roster / Lineup Settings --------
-    max_roster_size = models.PositiveIntegerField(
-        default=20,
-        help_text="Total max players on a team (including bench and IR)."
-    )
-    bench_slots = models.PositiveIntegerField(
-        default=3,
-        help_text="Number of bench slots per team."
-    )
-    ir_slots = models.PositiveIntegerField(
-        default=2,
-        help_text="Number of IR slots per team."
-    )
+    skater_waiver_hours = models.PositiveIntegerField(default=72)
+    goalie_waiver_hours = models.PositiveIntegerField(default=48)
 
-    # -------- Daily Lineup Lock Time --------
-    lock_hour = models.PositiveSmallIntegerField(
-        default=17,
-        help_text="Hour of day (0–23) when daily lineups lock."
-    )
-    lock_minute = models.PositiveSmallIntegerField(
-        default=0,
-        help_text="Minute of hour (0–59) when daily lineups lock."
-    )
+    max_roster_size = models.PositiveIntegerField(default=20)
+    bench_slots = models.PositiveIntegerField(default=3)
+    ir_slots = models.PositiveIntegerField(default=2)
+
+    lock_hour = models.PositiveSmallIntegerField(default=17)
+    lock_minute = models.PositiveSmallIntegerField(default=0)
+
+    def save(self, *args, **kwargs):
+        if not self.invite_code:
+            self.invite_code = secrets.token_hex(6).upper()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} ({self.season_year})"
@@ -75,7 +65,7 @@ class LeagueRole(models.Model):
         ("MANAGER", "Manager"),
     ]
 
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
 
@@ -84,6 +74,47 @@ class LeagueRole(models.Model):
 
     def __str__(self):
         return f"{self.user.username} — {self.role}"
+
+
+# ================================================================
+# TEAM + PLAYER (MINIMAL RESTORE TO UNBLOCK DRAFT/UI)
+# ================================================================
+
+class Team(models.Model):
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
+    manager = models.ForeignKey(User, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ("league", "name")
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.league.name})"
+
+
+class Player(models.Model):
+    nhl_id = models.CharField(max_length=20, unique=True)
+    full_name = models.CharField(max_length=120, db_index=True)
+
+    position = models.CharField(max_length=10, blank=True)  # C/LW/RW/D/G
+    number = models.CharField(max_length=10, blank=True)
+    shoots = models.CharField(max_length=10, blank=True)
+
+    games_played = models.PositiveIntegerField(default=0)
+    goals = models.PositiveIntegerField(default=0)
+    assists = models.PositiveIntegerField(default=0)
+    points = models.PositiveIntegerField(default=0)
+
+    fantasy_score = models.FloatField(default=0.0)
+    on_waivers = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["full_name"]
+
+    def __str__(self):
+        return self.full_name
 
 
 # ================================================================
@@ -103,11 +134,12 @@ class PlayerPosition(models.Model):
 # ================================================================
 
 class Position(models.Model):
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
     code = models.CharField(max_length=10)
+    slots = models.PositiveSmallIntegerField(default=0)
 
     allowed_player_positions = models.ManyToManyField(
-        PlayerPosition,
+        "PlayerPosition",
         blank=True,
         related_name="allowed_in_positions",
     )
@@ -124,113 +156,68 @@ class Position(models.Model):
 # ================================================================
 
 class Draft(models.Model):
-    league = models.OneToOneField(League, on_delete=models.CASCADE)
-    is_snake = models.BooleanField(default=True)
-    time_per_pick_seconds = models.IntegerField(default=90)
-    starts_at = models.DateTimeField(null=True, blank=True)
-    draft_order_generated = models.BooleanField(default=False)
+    DRAFT_TYPES = [
+        ("SNAKE", "Snake"),
+        ("LINEAR", "Linear"),
+    ]
+
+    ORDER_MODES = [
+        ("RANDOM", "Random"),
+        ("MANUAL", "Manual"),
+        ("ALPHA", "Alphabetical"),
+    ]
+
+    league = models.OneToOneField("League", on_delete=models.CASCADE, related_name="draft")
+
+    scheduled_start = models.DateTimeField(null=True, blank=True)
+
+    draft_type = models.CharField(max_length=10, choices=DRAFT_TYPES, default="SNAKE")
+    order_mode = models.CharField(max_length=10, choices=ORDER_MODES, default="RANDOM")
+
+    rounds = models.PositiveIntegerField(default=16)
+    time_per_pick = models.PositiveIntegerField(default=120, help_text="Seconds per pick")
+
+    is_active = models.BooleanField(default=False)
+    is_completed = models.BooleanField(default=False)
+
+    current_pick = models.PositiveIntegerField(default=1)
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"{self.league.name} Draft"
-
-
-class DraftPick(models.Model):
-    draft = models.ForeignKey(Draft, on_delete=models.CASCADE)
-    round_number = models.IntegerField()
-    pick_number = models.IntegerField()
-    overall_number = models.IntegerField()
-    team = models.ForeignKey("Team", on_delete=models.SET_NULL, null=True)
-    player = models.ForeignKey("Player", on_delete=models.SET_NULL, null=True, blank=True)
-    is_selected = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"Round {self.round_number}, Pick {self.pick_number}"
+        return f"Draft – {self.league.name}"
 
 
 class DraftOrder(models.Model):
-    draft = models.ForeignKey(Draft, on_delete=models.CASCADE)
-    position = models.IntegerField()
+    draft = models.ForeignKey("Draft", on_delete=models.CASCADE, related_name="order")
     team = models.ForeignKey("Team", on_delete=models.CASCADE)
+    position = models.PositiveIntegerField()
 
     class Meta:
+        unique_together = ("draft", "position")
         ordering = ["position"]
 
     def __str__(self):
-        return f"{self.draft} — {self.position}: {self.team}"
+        return f"{self.draft} – {self.position}: {self.team.name}"
 
 
-# ================================================================
-# TEAMS
-# ================================================================
+class DraftPick(models.Model):
+    draft = models.ForeignKey("Draft", on_delete=models.CASCADE, related_name="picks")
+    team = models.ForeignKey("Team", on_delete=models.CASCADE)
+    player = models.ForeignKey("Player", on_delete=models.CASCADE)
 
-class Team(models.Model):
-    name = models.CharField(max_length=100)
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
+    round_number = models.PositiveIntegerField()
+    pick_number = models.PositiveIntegerField()
 
-    manager = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="managed_teams",
-    )
+    made_at = models.DateTimeField(default=timezone.now)
 
-    def __str__(self):
-        return f"{self.name} ({self.league.name})"
-
-
-# ================================================================
-# NHL PLAYER
-# ================================================================
-
-class Player(models.Model):
-    nhl_id = models.IntegerField(unique=True, null=True, blank=True)
-    is_exception = models.BooleanField(default=False)
-
-    # Identity
-    first_name = models.CharField(max_length=50)
-    last_name = models.CharField(max_length=50)
-    full_name = models.CharField(max_length=100)
-
-    # PlayerPosition FK
-    position = models.ForeignKey(PlayerPosition, on_delete=models.CASCADE)
-
-    shoots = models.CharField(max_length=1, null=True, blank=True)
-    number = models.IntegerField(null=True, blank=True)
-    headshot = models.URLField(null=True, blank=True)
-
-    # Waivers
-    on_waivers = models.BooleanField(default=False)
-    waiver_expires = models.DateTimeField(null=True, blank=True)
-
-    # NHL stats
-    games_played = models.IntegerField(default=0)
-    goals = models.IntegerField(default=0)
-    assists = models.IntegerField(default=0)
-    points = models.IntegerField(default=0)
-    plus_minus = models.IntegerField(default=0)
-    shots = models.IntegerField(default=0)
-    hits = models.IntegerField(default=0)
-
-    # Fantasy scoring
-    fantasy_score = models.FloatField(default=0)
-
-    # Injuries
-    injured = models.BooleanField(default=False)
-    injury_note = models.CharField(max_length=100, null=True, blank=True)
-
-    updated = models.DateTimeField(auto_now=True)
-
-    @property
-    def is_goalie(self):
-        return self.position.code == "G"
-
-    def update_fantasy_score(self, league):
-        from league.utils.scoring import calculate_player_score
-        self.fantasy_score = calculate_player_score(self, league)
-        self.save(update_fields=["fantasy_score"])
+    class Meta:
+        unique_together = ("draft", "pick_number")
+        ordering = ["pick_number"]
 
     def __str__(self):
-        return f"{self.full_name} ({self.position.code})"
+        return f"Pick {self.pick_number} – {self.player}"
 
 
 # ================================================================
@@ -238,8 +225,8 @@ class Player(models.Model):
 # ================================================================
 
 class Roster(models.Model):
-    team = models.ForeignKey(Team, on_delete=models.CASCADE)
-    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    team = models.ForeignKey("Team", on_delete=models.CASCADE)
+    player = models.ForeignKey("Player", on_delete=models.CASCADE)
 
     class Meta:
         unique_together = ("team", "player")
@@ -253,7 +240,7 @@ class Roster(models.Model):
 # ================================================================
 
 class DailyLineup(models.Model):
-    team = models.ForeignKey(Team, on_delete=models.CASCADE)
+    team = models.ForeignKey("Team", on_delete=models.CASCADE)
     date = models.DateField()
 
     class Meta:
@@ -264,30 +251,19 @@ class DailyLineup(models.Model):
 
 
 class DailySlot(models.Model):
-    lineup = models.ForeignKey(DailyLineup, on_delete=models.CASCADE)
-    player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True)
-    slot = models.ForeignKey(Position, on_delete=models.CASCADE)
+    lineup = models.ForeignKey("DailyLineup", on_delete=models.CASCADE)
+    player = models.ForeignKey("Player", on_delete=models.SET_NULL, null=True, blank=True)
+    slot = models.ForeignKey("Position", on_delete=models.CASCADE)
 
     def clean(self):
-        # Check player fits the slot position rules
         if self.player:
             player_fits_slot(self.player, self.slot)
 
-        # Ensure slot is not used twice in same lineup
-        if DailySlot.objects.filter(
-            lineup=self.lineup,
-            slot=self.slot
-        ).exclude(id=self.id).exists():
+        if DailySlot.objects.filter(lineup=self.lineup, slot=self.slot).exclude(id=self.id).exists():
             raise ValidationError(f"Slot {self.slot.code} already assigned.")
 
-        # Ensure player is on this team's roster
-        if self.player and not Roster.objects.filter(
-            team=self.lineup.team,
-            player=self.player
-        ).exists():
-            raise ValidationError(
-                f"{self.player.full_name} is not on this team's roster."
-            )
+        if self.player and not Roster.objects.filter(team=self.lineup.team, player=self.player).exists():
+            raise ValidationError(f"{self.player.full_name} is not on this team's roster.")
 
     class Meta:
         unique_together = ("lineup", "slot")
@@ -301,10 +277,14 @@ class DailySlot(models.Model):
 # ================================================================
 
 class ScoringCategory(models.Model):
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
+
     stat_key = models.CharField(max_length=50)
     name = models.CharField(max_length=100)
     weight = models.FloatField(default=1.0)
+
+    lower_is_better = models.BooleanField(default=False)
+    is_goalie = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("league", "stat_key")
@@ -319,17 +299,14 @@ class ScoringCategory(models.Model):
 # ================================================================
 
 class LeagueSettings(models.Model):
-    league = models.OneToOneField(League, on_delete=models.CASCADE)
+    league = models.OneToOneField("League", on_delete=models.CASCADE)
 
-    # Waivers (note: also stored on League; we can consolidate later)
     goalie_waiver_hours = models.IntegerField(default=48)
     skater_waiver_hours = models.IntegerField(default=72)
 
-    # Limits
     weekly_move_limit = models.IntegerField(default=4)
     goalie_min_games = models.IntegerField(default=3)
 
-    # Lineup slot counts
     slots_c = models.IntegerField(default=2)
     slots_lw = models.IntegerField(default=2)
     slots_rw = models.IntegerField(default=2)
@@ -348,7 +325,7 @@ class LeagueSettings(models.Model):
 # ================================================================
 
 class PlayerAdvancedStats(models.Model):
-    player = models.OneToOneField(Player, on_delete=models.CASCADE)
+    player = models.OneToOneField("Player", on_delete=models.CASCADE)
     season = models.CharField(max_length=9, default="2024-25")
 
     corsi_for = models.FloatField(default=0)
@@ -383,13 +360,11 @@ class PlayerAdvancedStats(models.Model):
 # ================================================================
 
 class Transaction(models.Model):
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
-    team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True)
-    player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True)
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
+    team = models.ForeignKey("Team", on_delete=models.SET_NULL, null=True, blank=True)
+    player = models.ForeignKey("Player", on_delete=models.SET_NULL, null=True, blank=True)
 
     action = models.CharField(max_length=50)
-    # Examples: "ADD", "DROP", "TRADE", "MOVE_TO_IR", "MOVE_TO_BENCH", "COMMISSIONER_EDIT"
-
     note = models.CharField(max_length=200, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -405,17 +380,9 @@ class Transaction(models.Model):
 # ================================================================
 
 class Trade(models.Model):
-    league = models.ForeignKey(League, on_delete=models.CASCADE)
-    from_team = models.ForeignKey(
-        Team,
-        on_delete=models.CASCADE,
-        related_name="trades_sent"
-    )
-    to_team = models.ForeignKey(
-        Team,
-        on_delete=models.CASCADE,
-        related_name="trades_received"
-    )
+    league = models.ForeignKey("League", on_delete=models.CASCADE)
+    from_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trades_sent")
+    to_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trades_received")
 
     created_at = models.DateTimeField(auto_now_add=True)
     approved = models.BooleanField(default=False)
@@ -427,26 +394,10 @@ class Trade(models.Model):
 
 
 class TradeItem(models.Model):
-    trade = models.ForeignKey(
-        Trade,
-        on_delete=models.CASCADE,
-        related_name="items"
-    )
-    player = models.ForeignKey(Player, on_delete=models.CASCADE)
-    from_team = models.ForeignKey(
-        Team,
-        on_delete=models.CASCADE,
-        related_name="trade_items_out"
-    )
-    to_team = models.ForeignKey(
-        Team,
-        on_delete=models.CASCADE,
-        related_name="trade_items_in",
-        null=True,
-        blank=True,
-    )
-
-    
+    trade = models.ForeignKey("Trade", on_delete=models.CASCADE, related_name="items")
+    player = models.ForeignKey("Player", on_delete=models.CASCADE)
+    from_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trade_items_out")
+    to_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trade_items_in", null=True, blank=True)
 
     def __str__(self):
         return f"{self.player} in Trade {self.trade.id}"

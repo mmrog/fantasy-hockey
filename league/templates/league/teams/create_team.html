@@ -1,0 +1,44 @@
+<!-- templates/teams/create_team.html -->
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="mb-3">Create Team</h1>
+
+{% if league %}
+<p class="text-muted mb-4">
+    League: <strong>{{ league.name }}</strong> ({{ league.season_year }})
+</p>
+{% endif %}
+
+<form method="post" class="card bg-secondary text-light p-4">
+    {% csrf_token %}
+
+    <div class="mb-3">
+        <label for="teamName" class="form-label">Team Name</label>
+        <input
+            type="text"
+            id="teamName"
+            name="name"
+            class="form-control"
+            placeholder="Enter your team name"
+            required
+        />
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+            Create Team
+        </button>
+        {% if league %}
+        <a class="btn btn-outline-light" href="{% url 'league_dashboard' league.id %}">
+            Back to League
+        </a>
+        {% else %}
+        <a class="btn btn-outline-light" href="{% url 'league_dashboard' %}">
+            Back
+        </a>
+        {% endif %}
+    </div>
+</form>
+
+{% endblock %}

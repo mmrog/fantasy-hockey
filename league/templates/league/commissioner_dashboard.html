@@ -1,164 +1,133 @@
 {% extends "base.html" %}
+
 {% block content %}
 
-<h1 class="mb-3">Commissioner Dashboard – {{ league.name }} ({{ league.season_year }})</h1>
+<h1 class="mb-4">League Dashboard</h1>
 
-<div class="row mb-4">
+<!-- League Info Card -->
+<div class="card bg-secondary text-light mb-4">
+    <div class="card-body">
+        <h4 class="card-title mb-1">{{ league.name }} ({{ league.season_year }})</h4>
 
-    <!-- LEFT SIDE BUTTONS -->
-    <div class="col-md-3">
+        {% if team %}
+            <p class="card-text mb-1">
+                <strong>Your Team:</strong> {{ team.name }}
+            </p>
+        {% else %}
+            <p class="card-text text-warning mb-3">
+                You do not have a team yet.
+            </p>
 
-        <a href="{% url 'commish_settings' league.id %}" class="btn btn-primary w-100 mb-2">
-            ⚙️ Edit League Settings
-        </a>
+            <!-- Create Team CTA (only when user has no team in this league) -->
+            <a href="{% url 'create_team_specific' league.id %}"
+               class="btn btn-primary">
+                ➕ Create Your Team
+            </a>
+        {% endif %}
 
-        <a href="{% url 'scoring_settings' league.id %}" class="btn btn-secondary w-100 mb-2">
-            📊 Scoring Settings
-        </a>
-
-        <a href="{% url 'commish_roster_tools' league.id %}" class="btn btn-info w-100 mb-2">
-            ✏️ Roster Override Tool
-        </a>
-
-        <a href="#" class="btn btn-warning w-100 mb-2 disabled">
-            🔄 League Transactions (coming soon)
-        </a>
-
-        <a href="#" class="btn btn-success w-100 mb-2 disabled">
-            🏒 Draft Center (future)
-        </a>
-
+        <p class="mb-0 mt-2">
+            <strong>Your Role:</strong> {{ role.role|title }}
+        </p>
     </div>
+</div>
 
-    <!-- RIGHT SIDE: TEAM LIST -->
-    <div class="col-md-9">
-        <div class="card">
+<!-- COMMISSIONER SECTION -->
+{% if is_commissioner %}
+<div class="mt-5">
 
-            <div class="card-header">
-                <h4>League Teams</h4>
-            </div>
+    <h3 class="mb-3">Commissioner Tools</h3>
 
-            <div class="card-body">
+    <div class="row g-3">
 
-                {% if teams %}
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Team</th>
-                            <th>Manager</th>
-                            <th>Players</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-
-                    <tbody>
-                        {% for team in teams %}
-                        <tr>
-                            <td>{{ team.name }}</td>
-                            <td>
-                                {% if team.manager %}
-                                    {{ team.manager.username }}
-                                {% else %}
-                                    <em>No manager</em>
-                                {% endif %}
-                            </td>
-                            <td>{{ team.roster_set.count }}</td>
-                            <td>
-                                <a href="{% url 'commish_edit_team_roster' league.id team.id %}"
-                                   class="btn btn-sm btn-outline-primary">
-                                    Manage
-                                </a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-
-                </table>
-
-                {% else %}
-                <p>No teams have been created yet.</p>
-                {% endif %}
-
-            </div>
+        <!-- Commissioner Dashboard -->
+        <div class="col-12 col-md-6">
+            <a class="btn btn-danger w-100 btn-lg"
+               href="{% url 'commissioner_dashboard' league.id %}">
+                🛠️ Commissioner Dashboard
+            </a>
         </div>
+
+        <!-- Draft Settings (NEW) -->
+        <div class="col-12 col-md-6">
+            <a class="btn btn-info w-100 btn-lg"
+               href="{% url 'commish_draft_settings' league.id %}">
+                🧾 Draft Settings
+            </a>
+        </div>
+
+        <!-- Scoring Settings -->
+        <div class="col-12 col-md-6">
+            <a class="btn btn-warning w-100 btn-lg"
+               href="{% url 'scoring_settings' league.id %}">
+                ⚙️ Scoring Settings
+            </a>
+        </div>
+
     </div>
 
 </div>
+{% endif %}
 
-<!-- NEW ROW: TRANSACTIONS + TRADES -->
-<div class="row">
+<!-- Recent Activity -->
+<div class="card bg-secondary text-light mt-5">
+    <div class="card-body">
+        <h5 class="card-title mb-3">Recent Activity</h5>
 
-    <!-- Recent Transactions -->
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header">
-                <h4>Recent Transactions</h4>
-            </div>
-            <div class="card-body">
-                {% if recent_transactions %}
-                    <ul class="list-group">
-                        {% for tx in recent_transactions %}
-                        <li class="list-group-item">
-                            <strong>{{ tx.created_at|date:"Y-m-d H:i" }}</strong><br>
+        {% if recent_transactions or recent_trades %}
 
-                            {% if tx.team %}
-                                <span>Team: {{ tx.team.name }}</span><br>
-                            {% endif %}
+            {% if recent_transactions %}
+                <h6 class="mb-2">Transactions</h6>
+                <ul class="list-group mb-3">
+                    {% for tx in recent_transactions %}
+                    <li class="list-group-item bg-dark text-light">
+                        <strong>{{ tx.created_at|date:"Y-m-d H:i" }}</strong><br>
 
-                            {% if tx.player %}
-                                <span>Player: {{ tx.player.full_name }}</span><br>
-                            {% endif %}
+                        {% if tx.team %}
+                            <span>Team: {{ tx.team.name }}</span><br>
+                        {% endif %}
 
-                            <span>Action: {{ tx.action }}</span>
+                        {% if tx.player %}
+                            <span>Player: {{ tx.player.full_name }}</span><br>
+                        {% endif %}
 
-                            {% if tx.note %}
-                                <br><small class="text-muted">{{ tx.note }}</small>
-                            {% endif %}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No recent transactions.</p>
-                {% endif %}
-            </div>
-        </div>
+                        <span>Action: {{ tx.action }}</span>
+
+                        {% if tx.note %}
+                            <br><small class="text-muted">{{ tx.note }}</small>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+
+            {% if recent_trades %}
+                <h6 class="mb-2">Trades</h6>
+                <ul class="list-group">
+                    {% for trade in recent_trades %}
+                    <li class="list-group-item bg-dark text-light">
+                        <strong>{{ trade.created_at|date:"Y-m-d H:i" }}</strong><br>
+                        <span>{{ trade.from_team.name }} ↔ {{ trade.to_team.name }}</span><br>
+
+                        {% if trade.approved %}
+                            <span class="badge bg-success">Approved</span>
+                        {% elif trade.vetoed %}
+                            <span class="badge bg-danger">Vetoed</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Pending</span>
+                        {% endif %}
+
+                        {% if trade.commissioner_note %}
+                            <br><small class="text-muted">{{ trade.commissioner_note }}</small>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+
+        {% else %}
+            <p class="text-muted mb-0">No recent league activity yet.</p>
+        {% endif %}
     </div>
-
-    <!-- Recent Trades -->
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header">
-                <h4>Recent Trades</h4>
-            </div>
-            <div class="card-body">
-                {% if recent_trades %}
-                    <ul class="list-group">
-                        {% for trade in recent_trades %}
-                        <li class="list-group-item">
-                            <strong>{{ trade.created_at|date:"Y-m-d H:i" }}</strong><br>
-                            <span>{{ trade.from_team.name }} ↔ {{ trade.to_team.name }}</span><br>
-
-                            {% if trade.approved %}
-                                <span class="badge bg-success">Approved</span>
-                            {% elif trade.vetoed %}
-                                <span class="badge bg-danger">Vetoed</span>
-                            {% else %}
-                                <span class="badge bg-secondary">Pending</span>
-                            {% endif %}
-
-                            {% if trade.commissioner_note %}
-                                <br><small class="text-muted">{{ trade.commissioner_note }}</small>
-                            {% endif %}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No recent trades.</p>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
 </div>
 
 {% endblock %}

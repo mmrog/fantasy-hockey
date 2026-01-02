@@ -8,9 +8,12 @@
     <a href="{% url 'create_league' %}" class="btn btn-primary me-2">
         🏒 Create a New League (Commissioner)
     </a>
-    <a href="{% url 'create_team' %}" class="btn btn-secondary">
-        🙋 Join Existing League (Create Team)
-    </a>
+
+    <!-- Joining a league requires a league context.
+         This will be re-enabled later via invites or league list. -->
+    <button class="btn btn-secondary" disabled>
+        🙋 Join Existing League (Coming Soon)
+    </button>
 </div>
 
 {% endblock %}

@@ -1,0 +1,38 @@
+<!-- league/templates/league/matchup_day.html -->
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="mb-3">{{ league.name }} — Matchups ({{ day }})</h1>
+
+{% if not matchups %}
+  <div class="alert alert-warning">No matchups scheduled for this day.</div>
+{% endif %}
+
+{% for m in matchups %}
+  <div class="card mb-3 p-3">
+    <h4 class="mb-2">{{ m.home_team.name }} vs {{ m.away_team.name }}</h4>
+
+    <table class="table table-dark table-striped table-sm mb-0">
+      <thead>
+        <tr>
+          <th style="width: 20%">Cat</th>
+          <th style="width: 20%">{{ m.home_team.name }}</th>
+          <th style="width: 20%">{{ m.away_team.name }}</th>
+          <th style="width: 20%">Winner</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in m.category_results.all %}
+          <tr>
+            <td>{{ r.category.code }}</td>
+            <td>{{ r.home_value }}</td>
+            <td>{{ r.away_value }}</td>
+            <td>{{ r.winner }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endfor %}
+
+{% endblock %}

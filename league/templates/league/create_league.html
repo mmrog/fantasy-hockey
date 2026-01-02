@@ -1,0 +1,58 @@
+<!-- league/templates/league/create_league.html -->
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="mb-4">Create League</h1>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} mb-3" role="alert">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<form method="post" class="card bg-secondary text-light p-4">
+  {% csrf_token %}
+
+  {# Show form-wide + field errors cleanly #}
+  {% if form.non_field_errors %}
+    <div class="alert alert-danger mb-3" role="alert">
+      {{ form.non_field_errors }}
+    </div>
+  {% endif %}
+
+  <div class="mb-3">
+    <label class="form-label" for="{{ form.name.id_for_label }}">League Name</label>
+    {{ form.name }}
+    {% if form.name.errors %}
+      <div class="text-danger mt-1">{{ form.name.errors }}</div>
+    {% endif %}
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label" for="{{ form.season_year.id_for_label }}">Season Year</label>
+    {{ form.season_year }}
+    {% if form.season_year.errors %}
+      <div class="text-danger mt-1">{{ form.season_year.errors }}</div>
+    {% endif %}
+  </div>
+
+  <div class="mb-4">
+    <label class="form-label" for="{{ form.scoring_mode.id_for_label }}">Scoring Mode</label>
+    {{ form.scoring_mode }}
+    {% if form.scoring_mode.errors %}
+      <div class="text-danger mt-1">{{ form.scoring_mode.errors }}</div>
+    {% endif %}
+    <small class="text-light-50">
+      Fixed locks scoring weights. Custom lets you edit scoring during the season.
+    </small>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">Create League</button>
+    <a class="btn btn-outline-light" href="{% url 'league_dashboard' %}">Back</a>
+  </div>
+</form>
+
+{% endblock %}

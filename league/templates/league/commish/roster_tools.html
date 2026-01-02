@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Roster Tools – {{ league.name }}</h1>
+
+<ul>
+    {% for team in teams %}
+        <li>
+            {{ team.name }}
+            {% if team.manager %} ({{ team.manager.username }}){% endif %}
+            – <a href="{% url 'commish_edit_team_roster' league.id team.id %}">Edit</a>
+        </li>
+    {% empty %}
+        <li>No teams in this league yet.</li>
+    {% endfor %}
+</ul>
+{% endblock %}

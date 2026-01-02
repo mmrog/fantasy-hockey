@@ -1,340 +1,361 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
+# league/views.py
+
+from datetime import date, date as date_type
+
 from django.contrib import messages
-from datetime import date
+from django.contrib.auth.decorators import login_required
+from django.db import transaction
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
-from league.utils.decorators import role_required, commissioner_required
+from league.utils.decorators import commissioner_required
 
+from .forms import (
+    LeagueCreateForm,
+    TeamCreateForm,
+    WaiverSettingsForm,
+    JoinLeagueForm,
+    DraftSettingsForm,
+)
 from .models import (
     League,
     LeagueRole,
-    Team,
-    Player,
+    # Team,   # TEMP: Team model currently missing from league/models.py
+    # Player, # TEMP: Player model currently missing from league/models.py
+    PlayerPosition,
+    Position,
     Roster,
     DailyLineup,
     DailySlot,
     ScoringCategory,
     Transaction,
-    Trade,   # optional but now supported
+    Trade,
     LeagueSettings,
+    Draft,
 )
-
-from .forms import LeagueForm, WaiverSettingsForm
-
-
-# -------------------------------------------------------
-# HOME = TEAM HUB (if you have a team)
-# -------------------------------------------------------
-def home(request):
-    if not request.user.is_authenticated:
-        return redirect("login")
-
-    team = Team.objects.filter(manager=request.user).select_related("league").first()
-
-    if team:
-        return render(request, "league/team_home.html", {
-            "team": team,
-            "league": team.league,
-        })
-    else:
-        return redirect("league_dashboard")
+from .models_matchups import Matchup
 
 
 # -------------------------------------------------------
-# LEAGUE CREATION (Commissioner)
+# HOME
 # -------------------------------------------------------
 @login_required
+def home(request):
+    # Use reverse relation (League -> Team) without importing Team directly
+    # This assumes your Team model has: league = models.ForeignKey(League, ...)
+    # and: manager = models.ForeignKey(User, ...)
+    team = (
+        request.user.team_set.select_related("league")
+        .first()
+    )
+    if team:
+        return redirect("league_dashboard_specific", league_id=team.league.id)
+    return redirect("league_dashboard")
+
+
+# -------------------------------------------------------
+# JOIN LEAGUE (Manager)
+# -------------------------------------------------------
+@login_required
+def join_league(request):
+    if request.method == "POST":
+        form = JoinLeagueForm(request.POST)
+        if form.is_valid():
+            code = form.cleaned_data["invite_code"]
+            league = get_object_or_404(League, invite_code=code)
+
+            LeagueRole.objects.get_or_create(
+                league=league,
+                user=request.user,
+                defaults={"role": "MANAGER"},
+            )
+
+            # Check if this user already has a team in this league without importing Team
+            if league.team_set.filter(manager=request.user).exists():
+                messages.info(request, "You're already in this league and have a team.")
+                return redirect("league_dashboard_specific", league_id=league.id)
+
+            messages.success(request, f"Joined '{league.name}'. Now create your team.")
+            return redirect("create_team_specific", league_id=league.id)
+    else:
+        form = JoinLeagueForm()
+
+    return render(request, "league/join_league.html", {"form": form})
+
+
+# -------------------------------------------------------
+# CREATE LEAGUE (Commissioner)
+# -------------------------------------------------------
+@login_required
+@transaction.atomic
 def create_league(request):
     if request.method == "POST":
-        name = request.POST.get("name")
-        season_year = request.POST.get("season_year")
-        scoring_mode = request.POST.get("scoring_mode", "FIXED")
+        form = LeagueCreateForm(request.POST)
+        if form.is_valid():
+            league = form.save(commit=False)
+            league.commissioner = request.user
+            league.save()
 
-        league = League.objects.create(
-            name=name,
-            season_year=season_year,
-            commissioner=request.user,
-            scoring_mode=scoring_mode
-        )
+            LeagueRole.objects.get_or_create(
+                league=league,
+                user=request.user,
+                defaults={"role": "COMMISSIONER"},
+            )
 
-        LeagueRole.objects.create(
-            league=league,
-            user=request.user,
-            role="COMMISSIONER"
-        )
+            # Default LeagueSettings
+            LeagueSettings.objects.get_or_create(
+                league=league,
+                defaults={
+                    "goalie_waiver_hours": 48,
+                    "skater_waiver_hours": 72,
+                },
+            )
 
-        return redirect("league_dashboard", league_id=league.id)
+            # Default lineup positions + slot counts
+            DEFAULT_POSITIONS = {
+                "C": 2,
+                "LW": 2,
+                "RW": 2,
+                "F": 1,
+                "D": 4,
+                "G": 2,
+                "BN": 4,
+                "IR": 2,
+            }
+            for code, slots in DEFAULT_POSITIONS.items():
+                Position.objects.get_or_create(
+                    league=league,
+                    code=code,
+                    defaults={"slots": slots},
+                )
 
-    return render(request, "league/create_league.html")
+            # Default player positions (global)
+            core_pp = [
+                ("C", "Center"),
+                ("LW", "Left Wing"),
+                ("RW", "Right Wing"),
+                ("D", "Defense"),
+                ("G", "Goalie"),
+            ]
+            pp = {}
+            for code, desc in core_pp:
+                obj, _ = PlayerPosition.objects.get_or_create(
+                    code=code,
+                    defaults={"description": desc},
+                )
+                pp[code] = obj
+
+            # Allowed player positions per lineup slot
+            allowed_map = {
+                "C": ["C"],
+                "LW": ["LW"],
+                "RW": ["RW"],
+                "F": ["C", "LW", "RW"],
+                "D": ["D"],
+                "G": ["G"],
+                "BN": ["C", "LW", "RW", "D", "G"],
+                "IR": ["C", "LW", "RW", "D", "G"],
+            }
+            for pos in Position.objects.filter(league=league):
+                codes = allowed_map.get(pos.code)
+                if codes:
+                    pos.allowed_player_positions.set([pp[c] for c in codes])
+
+            # Default scoring categories
+            defaults = [
+                ("G", "Goals", 1.0, False, False),
+                ("A", "Assists", 1.0, False, False),
+                ("PLUS_MINUS", "Plus/Minus", 1.0, False, False),
+                ("PIM", "Penalty Minutes", 1.0, False, False),
+                ("PPP", "Power Play Points", 1.0, False, False),
+                ("SHG", "Short-Handed Goals", 1.0, False, False),
+                ("GWG", "Game-Winning Goals", 1.0, False, False),
+                ("SOG", "Shots", 1.0, False, False),
+                ("HIT", "Hits", 1.0, False, False),
+                ("BLK", "Blocks", 1.0, False, False),
+                ("W", "Wins", 1.0, False, True),
+                ("GA", "Goals Against", 1.0, True, True),
+                ("SV", "Saves", 1.0, False, True),
+                ("SO", "Shutouts", 1.0, False, True),
+            ]
+            for stat_key, name, weight, lower_is_better, is_goalie in defaults:
+                ScoringCategory.objects.get_or_create(
+                    league=league,
+                    stat_key=stat_key,
+                    defaults={
+                        "name": name,
+                        "weight": weight,
+                        "lower_is_better": lower_is_better,
+                        "is_goalie": is_goalie,
+                    },
+                )
+
+            messages.success(request, f"League '{league.name}' created.")
+            return redirect("create_team_specific", league_id=league.id)
+
+        messages.error(request, "Please fix the errors below.")
+        return render(request, "league/create_league.html", {"form": form})
+
+    form = LeagueCreateForm()
+    return render(request, "league/create_league.html", {"form": form})
 
 
 # -------------------------------------------------------
-# CREATE TEAM (User)
+# CREATE TEAM
 # -------------------------------------------------------
 @login_required
-def create_team(request, league_id=None):
+@transaction.atomic
+def create_team(request, league_id):
+    league = get_object_or_404(League, id=league_id)
+
+    if not LeagueRole.objects.filter(league=league, user=request.user).exists():
+        messages.error(request, "Join the league before creating a team.")
+        return redirect("join_league")
+
     if request.method == "POST":
-        name = request.POST["name"]
+        form = TeamCreateForm(request.POST)
+        if form.is_valid():
+            if league.team_set.filter(manager=request.user).exists():
+                return redirect("league_dashboard_specific", league_id=league.id)
 
-        if league_id:
-            league = get_object_or_404(League, id=league_id)
-        else:
-            league = League.objects.first()  # temporary fallback
+            team = form.save(commit=False)
+            team.league = league
+            team.manager = request.user
+            team.save()
 
-        Team.objects.create(
-            name=name,
-            league=league,
-            manager=request.user
-        )
+            LeagueRole.objects.get_or_create(
+                league=league,
+                user=request.user,
+                defaults={"role": "MANAGER"},
+            )
 
-        return redirect("league_dashboard", league_id=league.id)
+            return redirect("league_dashboard_specific", league_id=league.id)
+    else:
+        form = TeamCreateForm()
 
-    leagues = League.objects.all()
-
-    return render(request, "teams/create_team.html", {
-        "leagues": leagues
-    })
+    return render(request, "league/create_team.html", {"form": form, "league": league})
 
 
 # -------------------------------------------------------
-# LEAGUE DASHBOARD (Manager & Commissioner)
+# LEAGUE DASHBOARD
 # -------------------------------------------------------
 @login_required
 def league_dashboard(request, league_id=None):
+    role = LeagueRole.objects.filter(user=request.user).first()
+    league = role.league if role else None
+
     if league_id:
         league = get_object_or_404(League, id=league_id)
         role = LeagueRole.objects.filter(user=request.user, league=league).first()
-    else:
-        role = LeagueRole.objects.filter(user=request.user).first()
-        league = role.league if role else None
 
-    if not role or not league:
+    if not league or not role:
         return render(request, "league/no_league.html")
 
-    team = Team.objects.filter(manager=request.user, league=league).first()
+    team = league.team_set.filter(manager=request.user).first()
 
-    recent_transactions = (
-        Transaction.objects
-        .filter(league=league)
-        .select_related("team", "player")
-        .order_by("-created_at")[:10]
+    return render(
+        request,
+        "league/dashboard.html",
+        {"league": league, "team": team, "role": role},
     )
-
-    recent_trades = (
-        Trade.objects
-        .filter(league=league)
-        .select_related("from_team", "to_team")
-        .order_by("-created_at")[:5]
-    )
-
-    return render(request, "league/dashboard.html", {
-        "league": league,
-        "team": team,
-        "role": role,
-        "is_commissioner": role.role in ["COMMISSIONER", "CO_COMMISSIONER"],
-        "recent_transactions": recent_transactions,
-        "recent_trades": recent_trades,
-    })
 
 
 # -------------------------------------------------------
-# COMMISSIONER DASHBOARD + SETTINGS (A1)
+# COMMISSIONER DASHBOARD
 # -------------------------------------------------------
+@login_required
 @commissioner_required
 def commissioner_dashboard(request, league_id):
     league = get_object_or_404(League, id=league_id)
 
-    teams = (
-        Team.objects
-        .filter(league=league)
-        .select_related("manager")
+    members = LeagueRole.objects.filter(league=league).select_related("user")
+    teams = league.team_set.select_related("manager")
+
+    return render(
+        request,
+        "league/commish/commissioner_dashboard.html",
+        {
+            "league": league,
+            "members": members,
+            "teams": teams,
+            "draft_ready": teams.count() >= 2,
+        },
     )
 
-    recent_transactions = (
-        Transaction.objects
-        .filter(league=league)
-        .select_related("team", "player")
-        .order_by("-created_at")[:10]
-    )
-
-    recent_trades = (
-        Trade.objects
-        .filter(league=league)
-        .select_related("from_team", "to_team")
-        .order_by("-created_at")[:5]
-    )
-
-    context = {
-        "league": league,
-        "teams": teams,
-        "recent_transactions": recent_transactions,
-        "recent_trades": recent_trades,
-    }
-    return render(request, "league/commissioner_dashboard.html", context)
-
-
+# -------------------------------------------------------
+# COMMISH: DRAFT SETTINGS
+# -------------------------------------------------------
+@login_required
 @commissioner_required
-def commish_settings(request, league_id):
+def commish_draft_settings(request, league_id):
     league = get_object_or_404(League, id=league_id)
 
+    draft, _ = Draft.objects.get_or_create(league=league)
+
     if request.method == "POST":
-        form = LeagueForm(request.POST, instance=league)
+        form = DraftSettingsForm(request.POST, instance=draft)
         if form.is_valid():
             form.save()
-            messages.success(request, "League settings updated.")
+            messages.success(request, "Draft settings saved.")
             return redirect("commissioner_dashboard", league_id=league.id)
     else:
-        form = LeagueForm(instance=league)
+        form = DraftSettingsForm(instance=draft)
 
-    context = {
-        "league": league,
-        "form": form,
-    }
-    return render(request, "league/commish/settings.html", context)
-
-
+    return render(
+        request,
+        "league/commish/draft_settings.html",
+        {"league": league, "draft": draft, "form": form},
+    )
 # -------------------------------------------------------
-# LEAGUE SETTINGS (Waivers) (Commissioner Only)
+# DAILY LINEUP
 # -------------------------------------------------------
-@commissioner_required
-def league_settings(request, league_id):
-    league = get_object_or_404(League, id=league_id)
-
-    settings = LeagueSettings.objects.filter(league=league).first()
-    if settings is None:
-        settings = LeagueSettings.objects.create(league=league)
-
-    if request.method == "POST":
-        form = WaiverSettingsForm(request.POST, instance=settings)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Waiver settings updated.")
-            return redirect("league_dashboard", league_id=league.id)
-    else:
-        form = WaiverSettingsForm(instance=settings)
-
-    return render(request, "league/commish/waiver_settings.html", {
-        "league": league,
-        "form": form,
-    })
-
-
-# -------------------------------------------------------
-# SCORING SETTINGS (Commissioner Only)
-# -------------------------------------------------------
-def is_commissioner(user, league):
-    return LeagueRole.objects.filter(
-        league=league,
-        user=user,
-        role__in=["COMMISSIONER", "CO_COMMISSIONER"]
-    ).exists()
-
-
 @login_required
-def scoring_settings(request, league_id):
-    league = get_object_or_404(League, id=league_id)
+def daily_lineup(request):
+    team = request.user.team_set.first()
+    if not team:
+        return render(request, "league/no_team.html")
 
-    if not is_commissioner(request.user, league):
-        return redirect("home")
+    lineup, _ = DailyLineup.objects.get_or_create(team=team, date=date.today())
+    slots = DailySlot.objects.filter(lineup=lineup).select_related("player", "slot")
 
-    categories = ScoringCategory.objects.filter(league=league)
-
-    if request.method == "POST":
-        for cat in categories:
-            field = f"weight_{cat.id}"
-            new_weight = request.POST.get(field)
-
-            if new_weight:
-                try:
-                    cat.weight = float(new_weight)
-                    cat.save()
-                except ValueError:
-                    pass
-
-        return redirect("scoring_settings", league_id=league.id)
-
-    return render(request, "league/scoring_settings.html", {
-        "league": league,
-        "categories": categories,
-    })
-
-
-# -------------------------------------------------------
-# COMMISSIONER ROSTER TOOLS
-# -------------------------------------------------------
-@commissioner_required
-def commish_roster_tools(request, league_id):
-    league = get_object_or_404(League, id=league_id)
-
-    teams = (
-        Team.objects
-        .filter(league=league)
-        .select_related("manager")
+    return render(
+        request,
+        "league/daily_lineup.html",
+        {"team": team, "lineup": lineup, "slots": slots},
     )
 
-    context = {
-        "league": league,
-        "teams": teams,
-    }
-    return render(request, "league/commish/roster_tools.html", context)
 
-
-@commissioner_required
-def commish_edit_team_roster(request, league_id, team_id):
-    league = get_object_or_404(League, id=league_id)
-    team = get_object_or_404(Team, id=team_id, league=league)
-
-    roster = (
-        Roster.objects
-        .filter(team=team)
-        .select_related("player")
-    )
-
-    context = {
-        "league": league,
-        "team": team,
-        "roster": roster,
-    }
-    return render(request, "league/commish/edit_team_roster.html", context)
-
-
-# -------------------------------------------------------
-# TEAM ROSTER
-# -------------------------------------------------------
 @login_required
 def team_roster(request, league_id=None):
-    team = Team.objects.filter(manager=request.user).first()
-
+    team = request.user.team_set.first()
     if not team:
         return render(request, "league/no_team.html")
 
     roster = Roster.objects.filter(team=team).select_related("player")
 
-    return render(request, "league/team_roster.html", {
-        "team": team,
-        "roster": roster,
-    })
-
-
-# -------------------------------------------------------
-# DAILY LINEUP
-# -------------------------------------------------------
-@login_required
-def daily_lineup(request, league_id=None):
-    team = Team.objects.filter(manager=request.user).first()
-
-    if not team:
-        return render(request, "league/no_team.html")
-
-    lineup, created = DailyLineup.objects.get_or_create(
-        team=team,
-        date=date.today(),
+    return render(
+        request,
+        "league/team_roster.html",
+        {"team": team, "roster": roster},
     )
 
-    slots = DailySlot.objects.filter(lineup=lineup).select_related("player", "slot")
 
-    return render(request, "league/daily_lineup.html", {
-        "team": team,
-        "lineup": lineup,
-        "slots": slots,
-    })
+# -------------------------------------------------------
+# MATCHUPS
+# -------------------------------------------------------
+@login_required
+def matchup_day(request, league_id, day=None):
+    league = get_object_or_404(League, id=league_id)
+    score_day = date_type.fromisoformat(day) if day else timezone.localdate()
+
+    matchups = (
+        Matchup.objects.filter(league=league, date=score_day)
+        .select_related("home_team", "away_team")
+        .prefetch_related("category_results", "category_results__category")
+    )
+
+    return render(
+        request,
+        "league/matchup_day.html",
+        {"league": league, "day": score_day, "matchups": matchups},
+    )
