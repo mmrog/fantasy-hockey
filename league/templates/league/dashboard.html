@@ -1,3 +1,4 @@
+{# templates/league/dashboard.html #}
 {% extends "base.html" %}
 
 {% block content %}
@@ -13,6 +14,16 @@
             <p class="card-text mb-1">
                 <strong>Your Team:</strong> {{ team.name }}
             </p>
+
+            <div class="d-flex gap-2 flex-wrap mt-2">
+                <a class="btn btn-primary" href="{% url 'team_home' league.id %}">🏠 Team Home</a>
+
+                {# ✅ FIXED: these urls now require league_id #}
+                <a class="btn btn-outline-light" href="{% url 'team_roster' league.id %}">📋 Roster</a>
+                <a class="btn btn-outline-light" href="{% url 'daily_lineup' league.id %}">🧾 Lineup</a>
+
+                <a class="btn btn-outline-light" href="{% url 'draft_room' league.id %}">🧠 Draft Room</a>
+            </div>
         {% else %}
             <p class="card-text text-warning mb-3">
                 You do not have a team yet.
@@ -25,7 +36,7 @@
             </a>
         {% endif %}
 
-        <p class="mb-0 mt-2">
+        <p class="mb-0 mt-3">
             <strong>Your Role:</strong> {{ role.role|title }}
         </p>
     </div>
@@ -47,11 +58,11 @@
             </a>
         </div>
 
-        <!-- Scoring Settings -->
+        <!-- Draft Settings -->
         <div class="col-12 col-md-6">
             <a class="btn btn-warning w-100 btn-lg"
-               href="{% url 'scoring_settings' league.id %}">
-                ⚙️ Scoring Settings
+               href="{% url 'commish_draft_settings' league.id %}">
+                ⚙️ Draft Settings
             </a>
         </div>
 

@@ -1,43 +1,56 @@
 # league/forms.py
+
 from django import forms
-from django.apps import apps
 
-from .models import League, LeagueSettings, Draft
+from .models import (
+    League,
+    LeagueSettings,
+    Draft,
+    Team,
+)
 
+
+# ================================================================
+# LEAGUE
+# ================================================================
 
 class LeagueCreateForm(forms.ModelForm):
     class Meta:
         model = League
         fields = ["name", "season_year", "scoring_mode"]
         widgets = {
-            "name": forms.TextInput(attrs={"placeholder": "League name"}),
-            "season_year": forms.NumberInput(attrs={"min": 2000, "max": 2100}),
+            "name": forms.TextInput(
+                attrs={"placeholder": "League name", "class": "form-control"}
+            ),
+            "season_year": forms.NumberInput(
+                attrs={"min": 2000, "max": 2100, "class": "form-control"}
+            ),
+            "scoring_mode": forms.Select(attrs={"class": "form-select"}),
         }
 
+
+# ================================================================
+# TEAM
+# ================================================================
 
 class TeamCreateForm(forms.ModelForm):
-    """
-    Team creation form.
-    We resolve the Team model lazily to avoid import errors while Team
-    is temporarily missing from league/models.py.
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        Team = apps.get_model("league", "Team")
-        self._meta.model = Team
-
     class Meta:
-        model = None  # set dynamically in __init__
+        model = Team
         fields = ["name"]
         widgets = {
-            "name": forms.TextInput(attrs={"placeholder": "Team name"}),
+            "name": forms.TextInput(
+                attrs={"placeholder": "Team name", "class": "form-control"}
+            ),
         }
 
+
+# ================================================================
+# LEAGUE SETTINGS
+# ================================================================
 
 class WaiverSettingsForm(forms.ModelForm):
     """
     Commissioner-only form for waiver timing rules.
-    Matches the existing LeagueSettings model fields.
     """
     class Meta:
         model = LeagueSettings
@@ -45,7 +58,15 @@ class WaiverSettingsForm(forms.ModelForm):
             "goalie_waiver_hours",
             "skater_waiver_hours",
         ]
+        widgets = {
+            "goalie_waiver_hours": forms.NumberInput(attrs={"class": "form-control"}),
+            "skater_waiver_hours": forms.NumberInput(attrs={"class": "form-control"}),
+        }
 
+
+# ================================================================
+# JOIN LEAGUE
+# ================================================================
 
 class JoinLeagueForm(forms.Form):
     invite_code = forms.CharField(
@@ -70,7 +91,6 @@ class JoinLeagueForm(forms.Form):
 class DraftSettingsForm(forms.ModelForm):
     """
     Commissioner-only draft configuration.
-    Minimal fields needed to run the draft room.
     """
     class Meta:
         model = Draft
@@ -82,5 +102,11 @@ class DraftSettingsForm(forms.ModelForm):
             "time_per_pick",
         ]
         widgets = {
-            "scheduled_start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "scheduled_start": forms.DateTimeInput(
+                attrs={"type": "datetime-local", "class": "form-control"}
+            ),
+            "draft_type": forms.Select(attrs={"class": "form-select"}),
+            "order_mode": forms.Select(attrs={"class": "form-select"}),
+            "rounds": forms.NumberInput(attrs={"class": "form-control"}),
+            "time_per_pick": forms.NumberInput(attrs={"class": "form-control"}),
         }

@@ -4,42 +4,42 @@
 <h1 class="mb-4">Team Hub – {{ team.name }}</h1>
 
 <div class="card bg-secondary text-light mb-4">
-    <div class="card-body">
-        <h4 class="card-title mb-1">{{ team.name }}</h4>
-        <p class="mb-1">
-            <strong>League:</strong> {{ league.name }} ({{ league.season_year }})
-        </p>
-        <p class="mb-0">
-            <strong>Manager:</strong> {{ team.manager.username }}
-        </p>
-    </div>
+  <div class="card-body">
+    <h4 class="card-title mb-1">{{ team.name }}</h4>
+    <p class="mb-1">
+      <strong>League:</strong> {{ team.league.name }} ({{ team.league.season_year }})
+    </p>
+    <p class="mb-0">
+      <strong>Manager:</strong> {{ team.manager.username }}
+    </p>
+  </div>
 </div>
 
 <div class="row g-3">
 
-    <!-- Roster -->
-    <div class="col-12 col-md-6">
-        <a href="{% url 'team_roster' %}" class="btn btn-primary w-100 btn-lg">
-            📝 View Full Roster
-        </a>
-    </div>
+  <!-- Roster -->
+  <div class="col-12 col-md-6">
+    <a href="{% url 'team_roster' team.league.id %}" class="btn btn-primary w-100 btn-lg">
+      📝 View Full Roster
+    </a>
+  </div>
 
-    <!-- Daily Lineup -->
-    <div class="col-12 col-md-6">
-        <a href="{% url 'daily_lineup' %}" class="btn btn-info w-100 btn-lg">
-            📅 Set Today’s Lineup
-        </a>
-    </div>
+  <!-- Daily Lineup -->
+  <div class="col-12 col-md-6">
+    <a href="{% url 'daily_lineup' team.league.id %}" class="btn btn-info w-100 btn-lg">
+      📅 Set Today’s Lineup
+    </a>
+  </div>
 
 </div>
 
 <div class="card bg-secondary text-light mt-4">
-    <div class="card-body">
-        <h5 class="card-title">Team Activity</h5>
-        <p class="text-muted mb-0">
-            Recent team stats, last game performance, and matchup info can go here later.
-        </p>
-    </div>
+  <div class="card-body">
+    <h5 class="card-title">Team Activity</h5>
+    <p class="text-muted mb-0">
+      Recent team stats, last game performance, and matchup info can go here later.
+    </p>
+  </div>
 </div>
 
 {% endblock %}

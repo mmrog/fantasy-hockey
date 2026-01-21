@@ -1,24 +1,23 @@
 # league/admin.py
-
 from django.contrib import admin
 
+from league.draft.services import DraftCreateConfig, create_or_rebuild_draft, start_draft
+
 from .models import (
+    DailyLineup,
+    DailySlot,
+    Draft,
+    DraftOrder,
+    DraftPick,
     League,
     LeagueRole,
-    #Team,
-    #Player,
+    Player,
     PlayerPosition,
     Position,
     Roster,
-    DailyLineup,
-    DailySlot,
     ScoringCategory,
-    Draft,
-    DraftPick,
-    DraftOrder,
+    Team,
 )
-
-from .admin_actions import action_generate_draft_order, action_reset_draft_order
 
 
 # ======================
@@ -36,44 +35,56 @@ class LeagueAdmin(admin.ModelAdmin):
 @admin.register(LeagueRole)
 class LeagueRoleAdmin(admin.ModelAdmin):
     list_display = ("league", "user", "role")
-    search_fields = ("league__name", "user__username")
     list_filter = ("role",)
+    search_fields = ("league__name", "user__username")
     ordering = ("league", "user")
-
 
 
 # ======================
 # TEAM
 # ======================
-# TEMP DISABLED until Team model is restored
-# @admin.register(Team)
-# class TeamAdmin(admin.ModelAdmin):
-#     list_display = ("name", "league", "manager")
-#     search_fields = ("name", "manager__username")
-#     list_filter = ("league",)
+@admin.register(Team)
+class TeamAdmin(admin.ModelAdmin):
+    list_display = ("name", "league", "manager")
+    list_filter = ("league",)
+    search_fields = ("name", "manager__username", "league__name")
+    ordering = ("league", "name")
 
 
 # ======================
 # PLAYER
 # ======================
-# TEMP DISABLED until Player model is restored
-# @admin.register(Player)
-# class PlayerAdmin(admin.ModelAdmin):
-#     list_display = (
-#         "full_name",
-#         "position",
-#         "number",
-#         "shoots",
-#         "games_played",
-#         "goals",
-#         "assists",
-#         "points",
-#         "fantasy_score",
-#         "on_waivers",
-#     )
-#     search_fields = ("full_name", "nhl_id")
-#     list_filter = ("position", "on_waivers")
-#     ordering = ("full_name",)
+@admin.register(Player)
+class PlayerAdmin(admin.ModelAdmin):
+    list_display = (
+        "full_name",
+        "nhl_team_abbr",
+        "position",
+        "nhl_id",
+        "adp",
+        "is_active",
+        "on_waivers",
+    )
+    search_fields = ("full_name", "nhl_team_abbr", "nhl_id")
+    list_filter = ("nhl_team_abbr", "position", "is_active", "on_waivers")
+    ordering = ("full_name",)
+
+    fields = (
+        "full_name",
+        "nhl_id",
+        "nhl_team_abbr",
+        "position",
+        "number",
+        "shoots",
+        "adp",
+        "is_active",
+        "on_waivers",
+        "games_played",
+        "goals",
+        "assists",
+        "points",
+        "fantasy_score",
+    )
 
 # ======================
 # PLAYER POSITION
@@ -81,17 +92,17 @@ class LeagueRoleAdmin(admin.ModelAdmin):
 @admin.register(PlayerPosition)
 class PlayerPositionAdmin(admin.ModelAdmin):
     list_display = ("code", "description")
-    search_fields = ("code",)
+    search_fields = ("code", "description")
 
 
 # ======================
-# LINEUP SLOT POSITION TYPES
+# LINEUP POSITIONS
 # ======================
 @admin.register(Position)
 class PositionAdmin(admin.ModelAdmin):
-    list_display = ("code", "league")
-    search_fields = ("code", "league__name")
+    list_display = ("code", "league", "slots")
     list_filter = ("league",)
+    search_fields = ("code", "league__name")
     filter_horizontal = ("allowed_player_positions",)
 
 
@@ -101,8 +112,8 @@ class PositionAdmin(admin.ModelAdmin):
 @admin.register(Roster)
 class RosterAdmin(admin.ModelAdmin):
     list_display = ("team", "player")
+    list_filter = ("team__league", "team")
     search_fields = ("team__name", "player__full_name")
-    list_filter = ("team",)
 
 
 # ======================
@@ -111,16 +122,13 @@ class RosterAdmin(admin.ModelAdmin):
 @admin.register(DailyLineup)
 class DailyLineupAdmin(admin.ModelAdmin):
     list_display = ("team", "date")
-    list_filter = ("team", "date")
+    list_filter = ("team__league", "team", "date")
     search_fields = ("team__name",)
 
 
-# ======================
-# DAILY SLOT
-# ======================
 @admin.register(DailySlot)
 class DailySlotAdmin(admin.ModelAdmin):
-    list_display = ("lineup", "player", "slot", "id")
+    list_display = ("lineup", "slot", "player", "id")
     list_filter = ("slot",)
     search_fields = ("lineup__team__name", "player__full_name")
 
@@ -130,9 +138,27 @@ class DailySlotAdmin(admin.ModelAdmin):
 # ======================
 @admin.register(ScoringCategory)
 class ScoringCategoryAdmin(admin.ModelAdmin):
-    list_display = ("league", "stat_key", "name", "weight")
-    list_filter = ("league",)
-    search_fields = ("league__name", "stat_key")
+    list_display = ("league", "stat_key", "name", "weight", "lower_is_better", "is_goalie")
+    list_filter = ("league", "is_goalie", "lower_is_better")
+    search_fields = ("league__name", "stat_key", "name")
+
+
+# ======================
+# DRAFT ACTIONS
+# ======================
+@admin.action(description="Build draft grid (uses draft_type + order_mode)")
+def action_build_draft_grid(modeladmin, request, queryset):
+    for draft in queryset:
+        create_or_rebuild_draft(
+            draft=draft,
+            config=DraftCreateConfig(rounds=draft.rounds, time_per_pick=draft.time_per_pick),
+        )
+
+
+@admin.action(description="Start draft (clock begins immediately)")
+def action_start_draft(modeladmin, request, queryset):
+    for draft in queryset:
+        start_draft(draft=draft)
 
 
 # ======================
@@ -154,7 +180,7 @@ class DraftAdmin(admin.ModelAdmin):
     )
     list_filter = ("draft_type", "order_mode", "is_active", "is_completed")
     search_fields = ("league__name",)
-    actions = [action_generate_draft_order, action_reset_draft_order]
+    actions = (action_build_draft_grid, action_start_draft)
 
 
 @admin.register(DraftPick)
@@ -165,11 +191,13 @@ class DraftPickAdmin(admin.ModelAdmin):
         "pick_number",
         "team",
         "player",
+        "status",
+        "started_at",
         "made_at",
     )
-    list_filter = ("draft", "round_number", "team")
+    list_filter = ("draft", "round_number", "team", "status")
     search_fields = ("player__full_name", "team__name")
-    ordering = ("draft", "pick_number")
+    ordering = ("draft", "round_number", "pick_number")
 
 
 @admin.register(DraftOrder)

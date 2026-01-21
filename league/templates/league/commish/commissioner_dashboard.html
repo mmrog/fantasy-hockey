@@ -66,6 +66,23 @@
     </div>
 
 </div>
+
+<div class="card bg-secondary text-light mt-4">
+  <div class="card-body">
+    <h5 class="card-title mb-3">Draft</h5>
+
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-warning" href="{% url 'commish_draft_settings' league.id %}">Draft Settings</a>
+      <a class="btn btn-primary" href="{% url 'commish_draft_build' league.id %}">Build Draft (Order + Picks)</a>
+      <a class="btn btn-danger" href="{% url 'commish_draft_start' league.id %}">Start Draft</a>
+      <a class="btn btn-outline-light" href="{% url 'draft_room' league.id %}">Open Draft Room</a>
+    </div>
+
+    <p class="text-light-50 mt-3 mb-0">
+      Flow: set draft settings → build draft → start draft. No pause; the clock auto-picks on expiry.
+    </p>
+  </div>
+</div>
 {% endif %}
 
 <!-- Recent Activity -->

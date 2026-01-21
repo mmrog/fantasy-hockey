@@ -1,0 +1,57 @@
+{# league/templates/league/commish/manual_draft_order.html #}
+{% extends "base.html" %}
+{% block content %}
+  <h1>Manual Draft Order</h1>
+  <p><strong>League:</strong> {{ league.name }}</p>
+  <p><strong>Draft Type:</strong> {{ draft.get_draft_type_display }}</p>
+
+  <hr>
+
+  <form method="post">
+    {% csrf_token %}
+    <table>
+      <thead>
+        <tr>
+          <th>Position</th>
+          <th>Team</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pos in "x"|ljust:count %}
+          {% with idx=forloop.counter %}
+          <tr>
+            <td>{{ idx }}</td>
+            <td>
+              <select name="pos_{{ idx }}">
+                {% for t in teams %}
+                  {# try to preselect existing order #}
+                  {% with current=existing|slice:idx|last %}
+                  <option value="{{ t.id }}"
+                    {% if current and current.team.id == t.id %}selected{% endif %}
+                  >
+                    {{ t.name }}
+                  </option>
+                  {% endwith %}
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+          {% endwith %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <button type="submit">Save Manual Order</button>
+  </form>
+
+  <hr>
+
+  <form method="post" action="{% url 'commish_rebuild_draft_picks' league.id %}">
+    {% csrf_token %}
+    <button type="submit">Rebuild Draft Picks From This Order</button>
+  </form>
+
+  <p style="margin-top: 1rem;">
+    <a href="{% url 'commissioner_dashboard' league.id %}">Back to Commissioner Dashboard</a>
+  </p>
+{% endblock %}
