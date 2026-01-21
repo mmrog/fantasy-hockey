@@ -1,0 +1,115 @@
+{# league/templates/league/team/players.html #}
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="mb-3">Players</h1>
+
+<div class="d-flex gap-2 flex-wrap mb-3">
+  <a class="btn btn-outline-light {% if tab == 'free_agents' %}active{% endif %}"
+     href="?tab=free_agents">Free Agents</a>
+  <a class="btn btn-outline-light {% if tab == 'waivers' %}active{% endif %}"
+     href="?tab=waivers">Waivers</a>
+</div>
+
+<div class="card">
+  <div class="card-body">
+
+    <form method="get" class="d-flex gap-2 align-items-center flex-wrap mb-3">
+      <input type="hidden" name="tab" value="{{ tab }}"/>
+
+      <input
+        name="q"
+        class="form-control form-control-sm"
+        placeholder="Search..."
+        value="{{ q|default:'' }}"
+        style="max-width: 220px;"
+      />
+
+      <label class="text-muted small mb-0" for="pos">Position</label>
+      <select id="pos" name="pos" class="form-select form-select-sm" style="max-width: 140px;"
+              onchange="this.form.page.value=1; this.form.submit();">
+        {% for opt in pos_options %}
+          <option value="{{ opt }}" {% if pos == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="sort" class="form-select form-select-sm" style="max-width: 160px;"
+              onchange="this.form.page.value=1; this.form.submit();">
+        <option value="name" {% if sort == "name" %}selected{% endif %}>Sort: Name</option>
+        <option value="team" {% if sort == "team" %}selected{% endif %}>Sort: NHL Team</option>
+        <option value="rank" {% if sort == "rank" %}selected{% endif %}>Sort: Rank</option>
+      </select>
+
+      <input type="hidden" name="page" value="{{ page_obj.number|default:1 }}">
+      <button class="btn btn-sm btn-outline-light" type="submit">Apply</button>
+    </form>
+
+    {% if players %}
+      <div class="table-responsive">
+        <table class="table table-dark table-sm align-middle mb-2">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="text-center">Pos</th>
+              <th class="text-center">NHL</th>
+              <th class="text-end">GP</th>
+              <th class="text-end">G</th>
+              <th class="text-end">A</th>
+              <th class="text-end">P</th>
+              <th class="text-end">Rank</th>
+              <th class="text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pl in players %}
+              <tr>
+                <td>{{ pl.full_name }}</td>
+                <td class="text-center">{{ pl.position }}</td>
+                <td class="text-center">{{ pl.nhl_team_abbr }}</td>
+                <td class="text-end">{{ pl.games_played }}</td>
+                <td class="text-end">{{ pl.goals }}</td>
+                <td class="text-end">{{ pl.assists }}</td>
+                <td class="text-end">{{ pl.points }}</td>
+                <td class="text-end">{{ pl.fantasy_score|floatformat:1 }}</td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-outline-success" disabled>
+                    {% if tab == "waivers" %}Claim{% else %}Add{% endif %}
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <nav aria-label="Players pagination">
+        <ul class="pagination pagination-sm mb-0 flex-wrap">
+          {% if page_obj.has_previous %}
+            <li class="page-item">
+              <a class="page-link"
+                 href="?tab={{ tab }}&pos={{ pos }}&q={{ q|urlencode }}&sort={{ sort }}&page={{ page_obj.previous_page_number }}">Prev</a>
+            </li>
+          {% else %}
+            <li class="page-item disabled"><span class="page-link">Prev</span></li>
+          {% endif %}
+
+          <li class="page-item disabled">
+            <span class="page-link">Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+          </li>
+
+          {% if page_obj.has_next %}
+            <li class="page-item">
+              <a class="page-link"
+                 href="?tab={{ tab }}&pos={{ pos }}&q={{ q|urlencode }}&sort={{ sort }}&page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+          {% else %}
+            <li class="page-item disabled"><span class="page-link">Next</span></li>
+          {% endif %}
+        </ul>
+      </nav>
+    {% else %}
+      <p class="text-muted mb-0">No players found for this filter.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

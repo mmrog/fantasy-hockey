@@ -1,0 +1,290 @@
+{# league/templates/league/draft/draft_room.html #}
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  /* --- Draft table alignment tweaks (scoped) --- */
+  .draft-table th,
+  .draft-table td {
+    vertical-align: middle !important;
+    white-space: nowrap;            /* keeps numbers lined up */
+  }
+  .draft-table td.col-name {
+    white-space: normal;            /* allow long names to wrap */
+    min-width: 260px;
+  }
+  .draft-table th.col-actions,
+  .draft-table td.col-actions {
+    width: 1%;
+    text-align: right;
+  }
+  .draft-table th.num,
+  .draft-table td.num {
+    text-align: right;
+    width: 1%;
+    font-variant-numeric: tabular-nums; /* makes digits align nicely */
+  }
+  .draft-table th.short,
+  .draft-table td.short {
+    text-align: center;
+    width: 1%;
+  }
+
+  /* ✅ “cascade inside window” (no more page-long pole) */
+  .draft-table-wrap {
+    max-height: 70vh;
+    overflow: auto;
+  }
+  .draft-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bs-body-bg, #fff);
+  }
+</style>
+
+<div class="container-fluid px-3 px-lg-4">
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h1 class="m-0">Draft Room</h1>
+
+    {% if is_commissioner %}
+      <a class="btn btn-sm btn-outline-light" href="{% url 'commish_draft_settings' league.id %}">Settings</a>
+    {% endif %}
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h4 class="card-title mb-1">{{ league.name }} ({{ league.season_year }})</h4>
+      <div class="small text-muted">
+        Draft Type: <strong>{{ draft.draft_type|default:"—" }}</strong>
+        &nbsp;•&nbsp; Order Mode: <strong>{{ draft.order_mode|default:"—" }}</strong>
+        &nbsp;•&nbsp; Rounds: <strong>{{ draft.rounds|default:"—" }}</strong>
+        &nbsp;•&nbsp; Current Pick: <strong>{{ current_pick|default:"—" }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-lg-4">
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title mb-2">On the Clock</h5>
+          <div class="small text-muted">
+            {% if on_the_clock_team %}
+              <strong>{{ on_the_clock_team.name }}</strong>
+            {% else %}
+              Draft not started yet (or no current pick). Build grid + start the draft.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title mb-2">Draft Order</h5>
+          {% if draft_order %}
+            <ol class="mb-0 ps-3 small">
+              {% for t in draft_order %}
+                <li>{{ t.name }}</li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <div class="small text-muted">No order generated yet.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6 col-lg-12">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title mb-2">Round Tracker</h5>
+              <div class="small">
+                Round <strong>{{ current_round|default:"—" }}</strong> / <strong>{{ draft.rounds|default:"—" }}</strong><br>
+                Pick <strong>{{ current_pick_in_round|default:"—" }}</strong> / <strong>{{ picks_per_round|default:"—" }}</strong>
+              </div>
+              {% if round_progress_pct %}
+                <div class="progress mt-2" style="height: 10px;">
+                  <div class="progress-bar" role="progressbar" style="width: {{ round_progress_pct }}%;" aria-valuenow="{{ round_progress_pct }}" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-12">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title mb-2">Draft Info</h5>
+              <div class="small text-muted">
+                Queue is under Picks.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <h5 class="card-title mb-2">Picks</h5>
+
+          {% if picks %}
+            <div class="small">
+              {% for pick in picks %}
+                <div class="d-flex justify-content-between border-bottom py-1">
+                  <div>
+                    <strong>R{{ pick.round }}</strong> • Pick {{ pick.overall_pick }} —
+                    {{ pick.player.name|default:pick.player }}
+                  </div>
+                  <div class="text-muted">{{ pick.team.name|default:pick.team }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="small text-muted">No picks generated yet. Build the draft grid first.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title mb-2">Draft Queue (Next 10)</h5>
+
+          {% if queue %}
+            <ol class="mb-0 ps-3 small">
+              {% for qp in queue %}
+                <li>{{ qp.player.name|default:qp.player }}</li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <div class="small text-muted">Queue will appear once the draft is built.</div>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+
+    <div class="col-12 col-lg-8">
+
+      <div class="card">
+        <div class="card-body">
+
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+            <h5 class="card-title m-0">Available Players</h5>
+
+            <form class="d-flex align-items-center gap-2" method="get">
+              <input class="form-control form-control-sm" type="text" name="q" placeholder="Search..."
+                     value="{{ request.GET.q|default:'' }}" style="max-width: 220px;">
+
+              <select class="form-select form-select-sm" name="pos" style="max-width: 140px;">
+                <option value="ALL" {% if request.GET.pos|default:"ALL" == "ALL" %}selected{% endif %}>ALL</option>
+                <option value="C" {% if request.GET.pos == "C" %}selected{% endif %}>C</option>
+                <option value="LW" {% if request.GET.pos == "LW" %}selected{% endif %}>LW</option>
+                <option value="RW" {% if request.GET.pos == "RW" %}selected{% endif %}>RW</option>
+                <option value="D" {% if request.GET.pos == "D" %}selected{% endif %}>D</option>
+                <option value="G" {% if request.GET.pos == "G" %}selected{% endif %}>G</option>
+              </select>
+
+              <button class="btn btn-sm btn-outline-light" type="submit">Filter</button>
+            </form>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap mb-3">
+            <a class="btn btn-sm btn-outline-secondary"
+               href="?{% if request.GET.pos %}pos={{ request.GET.pos }}&{% endif %}{% if request.GET.q %}q={{ request.GET.q|urlencode }}&{% endif %}sort=name&dir=asc">
+              Name (asc)
+            </a>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="?{% if request.GET.pos %}pos={{ request.GET.pos }}&{% endif %}{% if request.GET.q %}q={{ request.GET.q|urlencode }}&{% endif %}sort=team&dir=asc">
+              Team
+            </a>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="?{% if request.GET.pos %}pos={{ request.GET.pos }}&{% endif %}{% if request.GET.q %}q={{ request.GET.q|urlencode }}&{% endif %}sort=rank&dir=asc">
+              Rank
+            </a>
+          </div>
+
+          <div class="draft-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle mb-0 draft-table">
+                <thead>
+                  <tr>
+                    <th class="col-name">Name</th>
+                    <th class="short">Pos</th>
+                    <th class="short">NHL</th>
+                    <th class="num">GP</th>
+                    <th class="num">G</th>
+                    <th class="num">A</th>
+                    <th class="num">P</th>
+                    <th class="num">NHL Rank</th>
+                    <th class="col-actions"></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% if page_obj and page_obj.object_list %}
+                    {% for p in page_obj.object_list %}
+                      <tr>
+                        <td class="col-name">{{ p.full_name }}</td>
+                        <td class="short">{{ p.position|default:"—" }}</td>
+                        <td class="short">{{ p.nhl_team_abbr|default:"—" }}</td>
+                        <td class="num">{{ p.games_played|default:"—" }}</td>
+                        <td class="num">{{ p.goals|default:"—" }}</td>
+                        <td class="num">{{ p.assists|default:"—" }}</td>
+                        <td class="num">{{ p.points|default:"—" }}</td>
+                        <td class="num">{{ p.nhl_rank|default:"—" }}</td>
+
+                        <td class="col-actions">
+                          <form method="post" action="{% url 'draft_room' league.id %}" class="m-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="player_id" value="{{ p.id }}">
+                            <button class="btn btn-sm btn-primary" type="submit">Pick</button>
+                          </form>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td colspan="9" class="text-muted small">No available players found for this filter.</td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {% if page_obj %}
+            <div class="d-flex justify-content-between align-items-center mt-3">
+              <div class="small text-muted">
+                Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
+              </div>
+
+              <div class="d-flex gap-2">
+                {% if page_obj.has_previous %}
+                  <a class="btn btn-sm btn-outline-light"
+                     href="?{% if qs %}{{ qs }}&{% endif %}page={{ page_obj.previous_page_number }}">
+                    Prev
+                  </a>
+                {% endif %}
+
+                {% if page_obj.has_next %}
+                  <a class="btn btn-sm btn-outline-light"
+                     href="?{% if qs %}{{ qs }}&{% endif %}page={{ page_obj.next_page_number }}">
+                    Next
+                  </a>
+                {% endif %}
+              </div>
+            </div>
+          {% endif %}
+
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+{% endblock %}

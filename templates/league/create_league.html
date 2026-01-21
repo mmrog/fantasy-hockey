@@ -1,26 +1,31 @@
-league/urls.py
+{# league/templates/league/create_league.html #}
+{% extends "base.html" %}
 
-path("league/create/", views.create_league, name="create_league"),
+{% block content %}
+<h1>Create League</h1>
 
+<form method="post" action="{% url 'create_league' %}">
+  {% csrf_token %}
 
+  <div class="mb-3">
+    <label class="form-label">League name</label>
+    <input class="form-control" type="text" name="name" required>
+  </div>
 
+  <div class="mb-3">
+    <label class="form-label">Season year</label>
+    <input class="form-control" type="number" name="season_year" value="2025">
+  </div>
 
+  <div class="mb-3">
+    <label class="form-label">Scoring mode</label>
+    <select class="form-select" name="scoring_mode">
+      <option value="FIXED" selected>Fixed</option>
+      <option value="CUSTOM">Custom (Commissioner Editable)</option>
+    </select>
+  </div>
 
-@login_required
-def create_league(request):
-    if request.method == "POST":
-        name = request.POST.get("name")
-        season_year = request.POST.get("season_year")
-        scoring_mode = request.POST.get("scoring_mode")
+  <button class="btn btn-primary" type="submit">Create League</button>
+</form>
+{% endblock %}
 
-        league = League.objects.create(
-            name=name,
-            season_year=season_year,
-            commissioner=request.user,
-            scoring_mode=scoring_mode
-        )
-
-        # TODO: auto-create scoring categories here
-        return redirect("league_dashboard")
-
-    return render(request, "league/create_league.html")

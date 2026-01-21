@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card bg-secondary text-light">
+  <div class="card-body">
+    <h1 class="h4 mb-3">Create Team</h1>
+
+    <p class="mb-3">
+      League: <strong>{{ league.name }}</strong> ({{ league.season_year }})
+    </p>
+
+    <form method="post">
+      {% csrf_token %}
+
+      {{ form.non_field_errors }}
+
+      <div class="mb-3">
+        <label class="form-label">Team name</label>
+        {{ form.name }}
+        {% if form.name.errors %}
+          <div class="text-warning mt-1">{{ form.name.errors }}</div>
+        {% endif %}
+      </div>
+
+      <button class="btn btn-primary" type="submit">Create Team</button>
+      <a class="btn btn-outline-light ms-2" href="{% url 'league_dashboard_specific' league.id %}">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

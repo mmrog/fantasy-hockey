@@ -6,7 +6,6 @@ import secrets
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils import timezone
 
 from .validators import player_fits_slot
 
@@ -54,7 +53,7 @@ class League(models.Model):
             self.invite_code = secrets.token_hex(6).upper()
         super().save(*args, **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.season_year})"
 
 
@@ -70,14 +69,16 @@ class LeagueRole(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
 
     class Meta:
-        unique_together = ("league", "user")
+        constraints = [
+            models.UniqueConstraint(fields=["league", "user"], name="uniq_league_role"),
+        ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user.username} — {self.role}"
 
 
 # ================================================================
-# TEAM + PLAYER (MINIMAL RESTORE TO UNBLOCK DRAFT/UI)
+# TEAM + PLAYER
 # ================================================================
 
 class Team(models.Model):
@@ -86,10 +87,12 @@ class Team(models.Model):
     name = models.CharField(max_length=100)
 
     class Meta:
-        unique_together = ("league", "name")
+        constraints = [
+            models.UniqueConstraint(fields=["league", "name"], name="uniq_team_name_per_league"),
+        ]
         ordering = ["name"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.league.name})"
 
 
@@ -97,23 +100,33 @@ class Player(models.Model):
     nhl_id = models.CharField(max_length=20, unique=True)
     full_name = models.CharField(max_length=120, db_index=True)
 
-    position = models.CharField(max_length=10, blank=True)  # C/LW/RW/D/G
+    # C/LW/RW/D/G
+    position = models.CharField(max_length=10, blank=True)
+
     number = models.CharField(max_length=10, blank=True)
     shoots = models.CharField(max_length=10, blank=True)
+
+    # NHL team abbr (ex: "WPG")
+    nhl_team_abbr = models.CharField(max_length=3, blank=True, default="", db_index=True)
+
+    # ADP (Average Draft Position). Lower = better.
+    adp = models.FloatField(null=True, blank=True, db_index=True)
 
     games_played = models.PositiveIntegerField(default=0)
     goals = models.PositiveIntegerField(default=0)
     assists = models.PositiveIntegerField(default=0)
     points = models.PositiveIntegerField(default=0)
 
+    # placeholder “rank/score” you can replace later
     fantasy_score = models.FloatField(default=0.0)
+
     on_waivers = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["full_name"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.full_name
 
 
@@ -125,7 +138,7 @@ class PlayerPosition(models.Model):
     code = models.CharField(max_length=10, unique=True)
     description = models.CharField(max_length=100, blank=True)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.code
 
 
@@ -145,9 +158,11 @@ class Position(models.Model):
     )
 
     class Meta:
-        unique_together = ("league", "code")
+        constraints = [
+            models.UniqueConstraint(fields=["league", "code"], name="uniq_position_code_per_league"),
+        ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.code} ({self.league.name})"
 
 
@@ -185,7 +200,10 @@ class Draft(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
-    def __str__(self):
+    # server-side clock enforcement
+    current_pick_started_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self) -> str:
         return f"Draft – {self.league.name}"
 
 
@@ -195,29 +213,89 @@ class DraftOrder(models.Model):
     position = models.PositiveIntegerField()
 
     class Meta:
-        unique_together = ("draft", "position")
+        constraints = [
+            models.UniqueConstraint(fields=["draft", "position"], name="uniq_draft_order_position"),
+            models.UniqueConstraint(fields=["draft", "team"], name="uniq_draft_order_team"),
+        ]
         ordering = ["position"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.draft} – {self.position}: {self.team.name}"
 
 
 class DraftPick(models.Model):
+    STATUS_UPCOMING = "UPCOMING"
+    STATUS_ON_CLOCK = "ON_CLOCK"
+    STATUS_MADE = "MADE"
+    STATUS_AUTO = "AUTO"
+
+    STATUSES = [
+        (STATUS_UPCOMING, "Upcoming"),
+        (STATUS_ON_CLOCK, "On the clock"),
+        (STATUS_MADE, "Made"),
+        (STATUS_AUTO, "Auto-picked"),
+    ]
+
     draft = models.ForeignKey("Draft", on_delete=models.CASCADE, related_name="picks")
-    team = models.ForeignKey("Team", on_delete=models.CASCADE)
-    player = models.ForeignKey("Player", on_delete=models.CASCADE)
+
+    # dynasty-ready: original owner + current owner
+    original_team = models.ForeignKey(
+        "Team",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="draft_picks_original",
+    )
+    team = models.ForeignKey(
+        "Team",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="draft_picks_owned",
+    )
+
+    player = models.ForeignKey("Player", on_delete=models.SET_NULL, null=True, blank=True)
 
     round_number = models.PositiveIntegerField()
     pick_number = models.PositiveIntegerField()
 
-    made_at = models.DateTimeField(default=timezone.now)
+    status = models.CharField(max_length=10, choices=STATUSES, default=STATUS_UPCOMING)
+    started_at = models.DateTimeField(null=True, blank=True)
+    made_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ("draft", "pick_number")
-        ordering = ["pick_number"]
+        constraints = [
+            # ✅ pick_number repeats each round, so include round_number
+            models.UniqueConstraint(
+                fields=["draft", "round_number", "pick_number"],
+                name="uniq_draft_round_pick_number",
+            ),
+        ]
+        ordering = ["round_number", "pick_number"]
 
-    def __str__(self):
-        return f"Pick {self.pick_number} – {self.player}"
+    def __str__(self) -> str:
+        who = self.player.full_name if self.player else "—"
+        owner = self.team.name if self.team else "Unassigned"
+        return f"R{self.round_number} P{self.pick_number} – {owner} – {who}"
+
+    def clean(self):
+        # once draft is active, prevent changing ownership
+        if not self.pk:
+            return
+
+        old = type(self).objects.filter(pk=self.pk).only("team_id", "original_team_id").first()
+        if not old:
+            return
+
+        if self.draft and self.draft.is_active:
+            if old.team_id != self.team_id:
+                raise ValidationError("Draft is active: pick ownership is locked.")
+            if old.original_team_id != self.original_team_id:
+                raise ValidationError("Draft is active: original owner is locked.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 # ================================================================
@@ -229,9 +307,11 @@ class Roster(models.Model):
     player = models.ForeignKey("Player", on_delete=models.CASCADE)
 
     class Meta:
-        unique_together = ("team", "player")
+        constraints = [
+            models.UniqueConstraint(fields=["team", "player"], name="uniq_roster_team_player"),
+        ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.team} — {self.player}"
 
 
@@ -244,9 +324,11 @@ class DailyLineup(models.Model):
     date = models.DateField()
 
     class Meta:
-        unique_together = ("team", "date")
+        constraints = [
+            models.UniqueConstraint(fields=["team", "date"], name="uniq_daily_lineup_team_date"),
+        ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.team.name} — {self.date}"
 
 
@@ -254,6 +336,11 @@ class DailySlot(models.Model):
     lineup = models.ForeignKey("DailyLineup", on_delete=models.CASCADE)
     player = models.ForeignKey("Player", on_delete=models.SET_NULL, null=True, blank=True)
     slot = models.ForeignKey("Position", on_delete=models.CASCADE)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["lineup", "slot"], name="uniq_daily_slot_lineup_slot"),
+        ]
 
     def clean(self):
         if self.player:
@@ -265,10 +352,7 @@ class DailySlot(models.Model):
         if self.player and not Roster.objects.filter(team=self.lineup.team, player=self.player).exists():
             raise ValidationError(f"{self.player.full_name} is not on this team's roster.")
 
-    class Meta:
-        unique_together = ("lineup", "slot")
-
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.lineup.date} — {self.slot.code}"
 
 
@@ -287,15 +371,17 @@ class ScoringCategory(models.Model):
     is_goalie = models.BooleanField(default=False)
 
     class Meta:
-        unique_together = ("league", "stat_key")
+        constraints = [
+            models.UniqueConstraint(fields=["league", "stat_key"], name="uniq_scoring_key_per_league"),
+        ]
         ordering = ["name"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} - {self.league.name}"
 
 
 # ================================================================
-# LEAGUE SETTINGS (extra knobs)
+# LEAGUE SETTINGS
 # ================================================================
 
 class LeagueSettings(models.Model):
@@ -316,7 +402,7 @@ class LeagueSettings(models.Model):
     slots_bn = models.IntegerField(default=3)
     slots_ir = models.IntegerField(default=2)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Settings for {self.league.name}"
 
 
@@ -351,7 +437,7 @@ class PlayerAdvancedStats(models.Model):
 
     updated = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.player.full_name} Advanced Stats ({self.season})"
 
 
@@ -371,7 +457,7 @@ class Transaction(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.action} — {self.player} ({self.created_at})"
 
 
@@ -389,7 +475,7 @@ class Trade(models.Model):
     vetoed = models.BooleanField(default=False)
     commissioner_note = models.CharField(max_length=200, blank=True, null=True)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Trade {self.id}: {self.from_team} ↔ {self.to_team}"
 
 
@@ -397,7 +483,14 @@ class TradeItem(models.Model):
     trade = models.ForeignKey("Trade", on_delete=models.CASCADE, related_name="items")
     player = models.ForeignKey("Player", on_delete=models.CASCADE)
     from_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trade_items_out")
-    to_team = models.ForeignKey("Team", on_delete=models.CASCADE, related_name="trade_items_in", null=True, blank=True)
+    to_team = models.ForeignKey(
+        "Team",
+        on_delete=models.CASCADE,
+        related_name="trade_items_in",
+        null=True,
+        blank=True,
+    )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.player} in Trade {self.trade.id}"
+
